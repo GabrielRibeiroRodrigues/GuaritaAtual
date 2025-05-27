@@ -7,5 +7,8 @@ easyocr==1.7.0
 filterpy==1.4.5
 keyboard
 filterpy==1.4.5
+psycopg2
+paddleocr
+paddlepaddle
 # scikit-image==0.17.2
 # lap==0.4.0

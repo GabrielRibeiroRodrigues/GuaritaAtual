@@ -9,10 +9,10 @@ import queue
 
 results = {}
 
-detector_placa = YOLO("C:\\Users\\User\\Desktop\\bestn.pt")
-# cap = cv2.VideoCapture("C:\\Users\\12265587630\\Desktop\\g3.mp4")
+detector_placa = YOLO("C:\\Users\\12265587630\\Desktop\\bestn.pt")
+cap = cv2.VideoCapture("C:\\Users\\12265587630\\Desktop\\g.mp4")
 # cap = cv2.VideoCapture("rtsp://admin:123456789abc@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0")
-cap = cv2.VideoCapture("rtsp://admin:123456789abc@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0")
+# cap = cv2.VideoCapture("rtsp://admin:123456789abc@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0")
 
 # cap = cv2.VideoCapture("rtsp://admin:123456789abc@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0")
 
