@@ -1,177 +1,243 @@
 import string
-import re # Importar regex
-# import psycopg2 # Comentado pois não estamos usando agora
+import psycopg2
 import cv2
 import numpy as np
 from paddleocr import PaddleOCR
 from datetime import datetime
 
-# ... (conexao e cursor comentados) ...
+conexao = psycopg2.connect(
+    dbname="pci_transito",
+    user="postgres",
+    password="123456",
+    host="localhost",
+    port="5432"
+)
+cursor = conexao.cursor()
 
-# Configuração do PaddleOCR
 ocr = PaddleOCR(
     lang='pt',
-    use_angle_cls=False, 
+    use_angle_cls=False,
     use_gpu=False,
-    det_limit_side_len=960, # Lado maior da imagem de entrada para detecção será redimensionado para este valor se maior.
-    # rec_image_shape="3, 48, 320", # Formato da imagem para o reconhecedor (default é "3, 32, 320")
-                                  # Aumentar a altura (e.g. 48) pode ajudar com caracteres mais altos.
-    # det_db_thresh=0.3,
-    # det_db_box_thresh=0.5, # Reduzir pode ajudar a detectar texto mais difícil, mas aumenta falsos positivos.
-    # det_db_unclip_ratio=1.6 # Quanto expandir a caixa detectada.
+    det_limit_side_len=640
 )
+char_to_int = {'O': '0', 'I': '1', 'J': '3', 'A': '4', 'G': '6', 'S': '5', 'B': '8'} # Added B:8
+int_to_char = {'0': 'O', '1': 'I', '3': 'J', '4': 'A', '6': 'G', '5': 'S', '8': 'B'} # Added 8:B
 
-# Dicionários para correção de caracteres
-char_to_int = {'O': '0', 'I': '1', 'J': '3', 'A': '4', 'G': '6', 'S': '5', 'B': '8', 'Z': '2', 'Q': '0', 'E': '3', 'T': '7', 'L': '1'}
-int_to_char = {'0': 'O', '1': 'I', '3': 'J', '4': 'A', '6': 'G', '5': 'S', '8': 'B', '2': 'Z', '7': 'T'}
+PALAVRAS_IGNORAR = {
+    'BRASIL', 'MERCOSUL', 'BRAZIL', # País e bloco
+    # Estados (siglas e nomes comuns, já limpos e em maiúsculas)
+    'SP', 'SAOPAULO', 'RJ', 'RIODEJANEIRO', 'MG', 'MINASGERAIS',
+    'ES', 'ESPIRITOSANTO', 'PR', 'PARANA', 'SC', 'SANTACATARINA', 'RS', 'RIOGRANDEDOSUL',
+    'MS', 'MATOGROSSODOSUL', 'MT', 'MATOGROSSO', 'GO', 'GOIAS', 'DF', 'DISTRITOFEDERAL',
+    'BA', 'BAHIA', 'SE', 'SERGIPE', 'AL', 'ALAGOAS', 'PE', 'PERNAMBUCO', 'PB', 'PARAIBA',
+    'RN', 'RIOGRANDEDONORTE', 'CE', 'CEARA', 'PI', 'PIAUI', 'MA', 'MARANHAO', 'TO', 'TOCANTINS',
+    'PA', 'PARA', 'AP', 'AMAPA', 'RR', 'RORAIMA', 'AM', 'AMAZONAS', 'AC', 'ACRE', 'RO', 'RONDONIA',
+    # Cidades (limpas, sem acentos e em maiúsculas)
+    # Mantendo as fornecidas e adicionando mais da região (Sul de Minas) e outras importantes
+    'GUAXUPE', 'MUZAMBINHO', 'NOVAREZENDE', 'SAOPEDRODAUNIAO', 'JURUAIA', # Fornecidas pelo usuário (normalizadas)
+    'PASSOS', 'POCOSDECALDAS', 'VARGINHA', 'ALFENAS', 'LAVRAS', 'UBERLANDIA', 'UBERABA', # Minas Gerais
+    'BELOHORIZONTE', 'JUIZDEFORA', 'MONTESCLAROS', 'DIVINOPOLIS', 'GOVERNADORVALADARES',
+    'CAMPINAS', 'RIBEIRAOPRETO', 'FRANCA', 'SAOJOSEDORIOPRETO', 'BAURU', # São Paulo (próximo a MG)
+    # Outros termos comuns
+    'MUNICIPIO', 'ESTADO', 'UF', 'BR',
+    # Termos que podem ser confundidos com partes da placa mas são contextuais
+    'FRENTE', 'TRAS', 'LATERAL', 'AUTO', 'MOTO', 'CAMINHAO', 'CARRO',
+ 
+}
 
+def is_letter_candidate(char_val):
+    return char_val in string.ascii_uppercase or char_val in int_to_char
 
-def limpar_texto_placa(texto):
-    # Remove caracteres não alfanuméricos e converte para maiúsculas
-    return ''.join(c for c in texto if c.isalnum()).upper()
+def is_digit_candidate(char_val):
+    # Check if it's a digit '0'-'9' or a character that can be mapped to a digit
+    return char_val.isdigit() or char_val in char_to_int
 
-def preprocess_for_paddleocr(image_bgr):
-    """
-    Pré-processa a imagem da placa (BGR) para melhorar o desempenho do PaddleOCR.
-    """
-    if image_bgr is None or image_bgr.size == 0:
-        print("[ERRO] Imagem de entrada para preprocess_for_paddleocr é inválida.")
+def license_complies_format(text):
+    if not text or len(text) != 7:
         return None
 
-    processed_image = image_bgr.copy()
-    height, width = processed_image.shape[:2]
+    # Pattern 1: LLLNNNN (Classic Brazilian)
+    if (is_letter_candidate(text[0]) and
+        is_letter_candidate(text[1]) and
+        is_letter_candidate(text[2]) and
+        is_digit_candidate(text[3]) and
+        is_digit_candidate(text[4]) and
+        is_digit_candidate(text[5]) and
+        is_digit_candidate(text[6])):
+        return "LLLNNNN"
 
-    # 1. Redimensionamento (Upscaling) se a imagem for pequena
-    min_char_height_approx = 10 # Altura mínima aproximada de um caractere para bom OCR
-    # Se a altura da placa for menor que ~3x isso, pode ser útil aumentar.
-    # Ex: se placa tem altura 20px, caracteres podem ter ~6px. Aumentar para 60px -> caracteres ~18px.
-    target_plate_height = 48 # Altura desejada para a imagem da placa
-    
-    if height < target_plate_height and height > 0: # Evitar divisão por zero
-        scale_factor = target_plate_height / height
-        new_width = int(width * scale_factor)
-        new_height = int(height * scale_factor)
-        # INTER_CUBIC é melhor para aumentar, mas mais lento. INTER_LINEAR é um bom compromisso.
-        processed_image = cv2.resize(processed_image, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-
-    # 2. Remoção de Ruído
-    processed_image = cv2.fastNlMeansDenoisingColored(processed_image, None, h=8, hColor=8, templateWindowSize=7, searchWindowSize=21)
-
-    # 3. Melhoria de Contraste (CLAHE no canal L do espaço de cor LAB)
-    try:
-        # Verificar se a imagem tem canais suficientes e não é excessivamente pequena para CLAHE
-        if len(processed_image.shape) == 3 and processed_image.shape[0] > 1 and processed_image.shape[1] > 1:
-            lab = cv2.cvtColor(processed_image, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            # tileGridSize menor para imagens menores pode ser melhor.
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4) if min(l.shape) < 50 else (8,8) )
-            cl = clahe.apply(l)
-            limg = cv2.merge((cl, a, b))
-            processed_image = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-        # else:
-            # print("[AVISO] Imagem pequena ou monocromática, pulando CLAHE.")
-    except cv2.error as e:
-        print(f"[AVISO] Erro ao aplicar CLAHE: {e}. Usando imagem após denoising.")
-        # Continua com a imagem que tinha antes do CLAHE.
-
-    return processed_image
-
-
-def validar_e_formatar_placa(texto_ocr):
-    """
-    Valida e formata o texto da placa OCR para os padrões brasileiros (antigo e Mercosul).
-    Aplica correções de caracteres comuns.
-    Retorna a placa formatada e validada, ou None.
-    """
-    texto_limpo = limpar_texto_placa(texto_ocr) 
-
-    if len(texto_limpo) != 7:
-        return None
-
-    regex_antigo_final = r"^[A-Z]{3}[0-9]{4}$"
-    regex_mercosul_final = r"^[A-Z]{3}[0-9][A-Z][0-9]{2}$"
-
-    def aplicar_correcoes_posicionais(texto_entrada, posicoes_letras, posicoes_numeros):
-        corrigido_lista = list(texto_entrada)
-        valido = True
-        for i in range(7):
-            char_atual = corrigido_lista[i]
-            if i in posicoes_letras:
-                if char_atual in int_to_char:
-                    corrigido_lista[i] = int_to_char[char_atual]
-                elif not corrigido_lista[i].isalpha(): # Após tentativa de correção, deve ser letra
-                    valido = False; break
-            elif i in posicoes_numeros:
-                if char_atual in char_to_int:
-                    corrigido_lista[i] = char_to_int[char_atual]
-                elif not corrigido_lista[i].isdigit(): # Após tentativa de correção, deve ser dígito
-                    valido = False; break
-            else: # Posição não coberta (não deve acontecer para len 7)
-                valido = False; break
-        
-        return "".join(corrigido_lista) if valido else None
-
-    # Tentativa 1: Formato Antigo (LLLNNNN)
-    pos_letras_antigo = [0, 1, 2]
-    pos_numeros_antigo = [3, 4, 5, 6]
-    texto_corrigido_antigo = aplicar_correcoes_posicionais(texto_limpo, pos_letras_antigo, pos_numeros_antigo)
-    if texto_corrigido_antigo and re.fullmatch(regex_antigo_final, texto_corrigido_antigo):
-        return texto_corrigido_antigo
-
-    # Tentativa 2: Formato Mercosul (LLLNLNN)
-    pos_letras_mercosul = [0, 1, 2, 4]
-    pos_numeros_mercosul = [3, 5, 6]
-    texto_corrigido_mercosul = aplicar_correcoes_posicionais(texto_limpo, pos_letras_mercosul, pos_numeros_mercosul)
-    if texto_corrigido_mercosul and re.fullmatch(regex_mercosul_final, texto_corrigido_mercosul):
-        return texto_corrigido_mercosul
+    # Pattern 2: LLLNLNN (Mercosul Standard - Cars, Motorcycles, etc.)
+    if (is_letter_candidate(text[0]) and
+        is_letter_candidate(text[1]) and
+        is_letter_candidate(text[2]) and
+        is_digit_candidate(text[3]) and
+        is_letter_candidate(text[4]) and # Letter at index 4
+        is_digit_candidate(text[5]) and
+        is_digit_candidate(text[6])):
+        return "LLLNLNN"
         
     return None
 
+def format_char(char_val, target_type):
+    """Corrects a single character to be a letter or digit based on target_type ('L' or 'N')."""
+    if target_type == 'L':  # Target is Letter
+        if char_val in int_to_char: return int_to_char[char_val]
+        if char_val.isalpha() and char_val.upper() in string.ascii_uppercase: return char_val.upper()
+        # If it's a digit but should be a letter, and not in int_to_char, it's problematic.
+        # For now, return original if no direct mapping.
+        return char_val.upper() if char_val.isalpha() else char_val
+    elif target_type == 'N':  # Target is Number
+        if char_val in char_to_int: return char_to_int[char_val]
+        if char_val.isdigit(): return char_val
+        # If it's a letter but should be a digit, and not in char_to_int, it's problematic.
+        return char_val
+    return char_val # Fallback
 
-def ler_placas2(placa_carro_crop_bgr):
-    """
-    Recebe um recorte de placa (imagem BGR), pré-processa, e usa PaddleOCR para ler o texto.
-    Valida e formata o texto da placa.
-    """
-    if placa_carro_crop_bgr is None or placa_carro_crop_bgr.size == 0:
-        # print("[ERRO] Imagem de entrada para ler_placas2 é inválida.")
-        return None, None
+def corrigir_placa(text, pattern_code):
+    if not pattern_code or len(text) != 7:
+        return text.upper() # Return uppercase original if no pattern or wrong length
 
-    img_para_ocr_bgr = preprocess_for_paddleocr(placa_carro_crop_bgr)
+    corrected_plate = list(text) # Start with the original text
+
+    char_type_pattern = ""
+    if pattern_code == "LLLNNNN":
+        char_type_pattern = "LLLNNNN"
+    elif pattern_code == "LLLNLNN":
+        char_type_pattern = "LLLNLNN"
+    else:
+        return text.upper() # Unknown pattern
+
+    for i in range(7):
+        corrected_plate[i] = format_char(text[i], char_type_pattern[i])
     
-    if img_para_ocr_bgr is None:
-        # print("[AVISO] Pré-processamento retornou None, tentando OCR na imagem original.")
-        img_para_ocr_bgr = placa_carro_crop_bgr
+    return "".join(corrected_plate)
 
-    try:
-        img_rgb = cv2.cvtColor(img_para_ocr_bgr, cv2.COLOR_BGR2RGB)
-    except cv2.error as e:
-        # print(f"[ERRO] Falha ao converter imagem para RGB: {e}. Abortando OCR.")
-        return None, None
+buffer_leituras = []
+BUFFER_SIZE = 10  # Increased buffer size
 
-    results = ocr.ocr(img_rgb) 
+def salvar_no_postgres(frame_nmr, car_id, license_number, license_number_score):
+    global buffer_leituras, conexao, cursor
+    data_hora_atual = datetime.now()
+    buffer_leituras.append((int(frame_nmr), int(car_id), license_number, float(license_number_score), data_hora_atual))
+    
+    if len(buffer_leituras) >= BUFFER_SIZE:
+        try:
+            comando_sql = """
+            INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
+            VALUES (%s, %s, %s, %s, %s);
+            """
+            cursor.executemany(comando_sql, buffer_leituras)
+            conexao.commit()
+            print(f"[DB_INFO] Lote de {len(buffer_leituras)} leituras salvo no banco de dados.")
+            buffer_leituras = []
+        except psycopg2.Error as e:
+            print(f"[DB_ERROR] Erro ao salvar lote no PostgreSQL: {e}")
+            conexao.rollback()
+            buffer_leituras = [] # Clear buffer on error to avoid retrying bad data or use a dead-letter queue
+        except Exception as ex:
+            print(f"[DB_ERROR] Erro inesperado ao salvar lote: {ex}")
+            conexao.rollback()
+            buffer_leituras = []
+
+def flush_buffer_leituras():
+    global buffer_leituras, conexao, cursor
+    if buffer_leituras:
+        try:
+            comando_sql = """
+            INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
+            VALUES (%s, %s, %s, %s, %s);
+            """
+            cursor.executemany(comando_sql, buffer_leituras)
+            conexao.commit()
+            print(f"[DB_INFO] Buffer final de {len(buffer_leituras)} leituras salvo no banco de dados.")
+        except psycopg2.Error as e:
+            print(f"[DB_ERROR] Erro ao fazer flush do buffer para o PostgreSQL: {e}")
+            conexao.rollback()
+        except Exception as ex:
+            print(f"[DB_ERROR] Erro inesperado ao fazer flush do buffer: {ex}")
+            conexao.rollback()
+        buffer_leituras = [] # Always clear after attempting flush
+
+def close_db_connection():
+    global conexao, cursor
+    print("[INFO] Tentando descarregar buffer e fechar conexão com DB...")
+    flush_buffer_leituras()
+    if cursor:
+        cursor.close()
+    if conexao:
+        conexao.close()
+    print("[DB_INFO] Conexão com PostgreSQL fechada.")
+
+def limpar_texto_placa(texto):
+    caracteres_remover = "-.!@#$%^&*()[]{};:,<>?/\\|`~'\""
+    return ''.join(c for c in texto if c not in caracteres_remover).strip().upper()
+
+def ler_placas2(placa_carro_crop): # PaddleOCR based
+    if len(placa_carro_crop.shape) == 2:
+        img_rgb = cv2.cvtColor(placa_carro_crop, cv2.COLOR_GRAY2RGB)
+    else:
+        img_rgb = cv2.cvtColor(placa_carro_crop, cv2.COLOR_BGR2RGB)
+
+    results = ocr.ocr(img_rgb, cls=False)
     
     if not results or not results[0]:
+        # print("[INFO] Nenhum texto detectado pelo OCR (PaddleOCR) ou resultado vazio.")
         return None, None
 
-    best_score = 0.0
-    best_plate = None
-
-    # results[0] contém a lista de [box, (text, score)] para a imagem
-    for detection_info in results[0]: 
-        # detection_info é [box, (text, score)]
-        text_ocr = detection_info[1][0]
-        score_ocr = detection_info[1][1]
-        
-        placa_formatada = validar_e_formatar_placa(text_ocr)
-        
-        if placa_formatada:
-            if score_ocr > best_score:
-                best_score = score_ocr
-                best_plate = placa_formatada
+    all_detections_for_image = results[0]
     
-    if best_plate:
-        return best_plate, best_score
+    # Debug: Imprimir resultados brutos do OCR
+    # print("Resultados brutos do PaddleOCR:")
+    # if all_detections_for_image:
+    #     for idx, detection_item in enumerate(all_detections_for_image):
+    #         print(f"  Detecção {idx}: Box={detection_item[0]}, Texto='{detection_item[1][0]}', Confiança={detection_item[1][1]:.4f}")
+
+    # Tenta combinar múltiplas detecções
+    if all_detections_for_image and len(all_detections_for_image) > 1:
+        texts_to_combine = []
+        scores_to_combine = []
+        
+        # Ordenar por posição X (da esquerda para direita) e depois Y (de cima para baixo)
+        # Box é [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+        # Usar o canto superior esquerdo (x1, y1) para ordenação.
+        try:
+            sorted_detections = sorted(all_detections_for_image, key=lambda det: (det[0][0][0], det[0][0][1]))
+        except TypeError: # Fallback if box structure is unexpected
+            print("[WARN] Não foi possível ordenar as detecções do OCR. Usando ordem original.")
+            sorted_detections = all_detections_for_image
+
+
+        for detection_item in sorted_detections:
+            text_ocr = detection_item[1][0]
+            score_ocr = detection_item[1][1]
+            
+            processed_text = limpar_texto_placa(text_ocr)
+
+            if processed_text and processed_text not in PALAVRAS_IGNORAR and len(processed_text) > 0: # Adicionado len > 0
+                texts_to_combine.append(processed_text)
+                scores_to_combine.append(score_ocr)
+        
+        if texts_to_combine:
+            combined_text = "".join(texts_to_combine)
+            pattern = license_complies_format(combined_text)
+            if pattern:
+                avg_score = sum(scores_to_combine) / len(scores_to_combine) if scores_to_combine else 0.0
+                corrected_plate = corrigir_placa(combined_text, pattern)
+                print(f"[INFO] Placa combinada: {corrected_plate} (de '{combined_text}'), Confiança Média: {avg_score:.2f} de {len(texts_to_combine)} partes.")
+                return corrected_plate, avg_score
+
+    # Lógica para detecção única ou fallback
+    if all_detections_for_image:
+        for detection_item in all_detections_for_image:
+            text_ocr = detection_item[1][0]
+            score_ocr = detection_item[1][1]
+
+            processed_text = limpar_texto_placa(text_ocr)
+            
+            pattern = license_complies_format(processed_text)
+            if pattern:
+                corrected_plate = corrigir_placa(processed_text, pattern)
+                print(f"[INFO] Placa individual: {corrected_plate} (de '{processed_text}'), Confiança: {score_ocr:.2f}")
+                return corrected_plate, score_ocr
 
     return None, None
-
