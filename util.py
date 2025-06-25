@@ -5,19 +5,12 @@ import numpy as np
 from paddleocr import PaddleOCR
 from datetime import datetime
 
-conexao = psycopg2.connect(
-    dbname="pci_transito",
-    user="postgres",
-    password="123456",
-    host="localhost",
-    port="5432"
-)
-cursor = conexao.cursor()
+
 
 ocr = PaddleOCR(
     lang='pt',
     use_angle_cls=False,
-    use_gpu=False,
+  
     det_limit_side_len=640
 )
 char_to_int = {'O': '0', 'I': '1', 'J': '3', 'A': '4', 'G': '6', 'S': '5', 'B': '8'} # Added B:8

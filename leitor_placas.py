@@ -68,7 +68,7 @@ def processar_imagem(caminho_arquivo):
             print(
                 f"[INFO] Frame: {frame_nmr}, Carro ID: {car_id}, Placa: {texto_detectado}, Confiança: {confianca_texto_detectado:.2f}"
             )
-            salvar_no_postgres(frame_nmr, car_id, texto_detectado, confianca_texto_detectado)
+           
         # else:
         # print(f"[INFO] Placa não detectada ou confiança baixa para {nome}. Conf: {confianca_texto_detectado}")
 
