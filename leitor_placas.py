@@ -3,6 +3,7 @@ import cv2
 import time
 import gc
 import signal  # Import for signal handling
+from datetime import datetime, timedelta
 from util import (
     ler_placas2,
     salvar_no_postgres,
@@ -14,8 +15,78 @@ pasta_base = os.path.join(os.path.expanduser("~"), "Desktop", "placas_detectadas
 confianca_gravar_texto = 0.1  # Mantido, mas a lógica de correção pode ajudar placas com menor confiança inicial
 
 
+def remover_arquivo_com_retry(caminho_arquivo, max_tentativas=3, delay=0.1):
+    """
+    Remove um arquivo com múltiplas tentativas para lidar com locks temporários.
+    """
+    for tentativa in range(max_tentativas):
+        try:
+            if os.path.exists(caminho_arquivo):
+                os.remove(caminho_arquivo)
+                print(f"[INFO] Arquivo removido: {os.path.basename(caminho_arquivo)}")
+                return True
+            else:
+                print(f"[WARN] Arquivo não existe para remoção: {caminho_arquivo}")
+                return True  # Considera sucesso se não existe
+        except PermissionError:
+            print(f"[WARN] Arquivo em uso, tentativa {tentativa + 1}/{max_tentativas}: {os.path.basename(caminho_arquivo)}")
+            if tentativa < max_tentativas - 1:
+                time.sleep(delay * (tentativa + 1))  # Delay crescente
+        except Exception as e:
+            print(f"[ERRO] Falha ao remover arquivo {os.path.basename(caminho_arquivo)}: {e}")
+            if tentativa < max_tentativas - 1:
+                time.sleep(delay)
+    
+    print(f"[ERRO] Não foi possível remover o arquivo após {max_tentativas} tentativas: {os.path.basename(caminho_arquivo)}")
+    return False
+
+
+def verificar_arquivo_completo(caminho_arquivo, tempo_estabilidade=2):
+    """
+    Verifica se um arquivo está completo (não está sendo escrito).
+    Compara o tamanho do arquivo em intervalos para detectar se ainda está sendo escrito.
+    """
+    try:
+        if not os.path.exists(caminho_arquivo):
+            return False
+        
+        tamanho_inicial = os.path.getsize(caminho_arquivo)
+        time.sleep(tempo_estabilidade)
+        
+        if not os.path.exists(caminho_arquivo):
+            return False
+            
+        tamanho_final = os.path.getsize(caminho_arquivo)
+        
+        # Se o tamanho mudou, o arquivo ainda está sendo escrito
+        if tamanho_inicial != tamanho_final:
+            print(f"[INFO] Arquivo ainda sendo escrito: {os.path.basename(caminho_arquivo)}")
+            return False
+            
+        # Verifica se consegue abrir o arquivo para leitura (sem locks de escrita)
+        try:
+            with open(caminho_arquivo, 'rb') as f:
+                pass  # Apenas tenta abrir
+            return True
+        except (PermissionError, IOError):
+            print(f"[INFO] Arquivo com lock de escrita: {os.path.basename(caminho_arquivo)}")
+            return False
+            
+    except Exception as e:
+        print(f"[WARN] Erro ao verificar arquivo {os.path.basename(caminho_arquivo)}: {e}")
+        return False
+
+
 def processar_imagem(caminho_arquivo):
     nome = os.path.basename(caminho_arquivo)
+    arquivo_processado_com_sucesso = False
+    img_carregada = False
+    
+    # Verifica se o arquivo está completo antes de processar
+    if not verificar_arquivo_completo(caminho_arquivo):
+        print(f"[INFO] Arquivo não está pronto para processamento: {nome}")
+        return False
+    
     try:
         partes = nome.split("_")
         # Adicionar mais validações para evitar IndexError
@@ -42,19 +113,15 @@ def processar_imagem(caminho_arquivo):
         car_id = -1
 
     try:
-        # Carregar a imagem. Se for muito grande, considerar redimensionar aqui
-        # para economizar memória antes do OCR, se a qualidade do OCR não for muito afetada.
+        # Carregar a imagem
         img = cv2.imread(caminho_arquivo, cv2.IMREAD_GRAYSCALE)
         if img is None:
-            print(f"[ERRO] Não foi possível ler a imagem: {caminho_arquivo}")
-            # Tentar remover arquivo corrompido ou ilegível
-            try:
-                os.remove(caminho_arquivo)
-                print(f"[INFO] Arquivo problemático removido: {caminho_arquivo}")
-            except Exception as e_rem:
-                print(f"[ERRO] Falha ao remover arquivo problemático {caminho_arquivo}: {e_rem}")
-            return
+            print(f"[ERRO] Não foi possível ler a imagem: {nome}")
+            # Remove arquivo corrompido ou ilegível
+            remover_arquivo_com_retry(caminho_arquivo)
+            return True  # Retorna True pois o arquivo foi "processado" (removido)
 
+        img_carregada = True
         texto_detectado, confianca_texto_detectado = ler_placas2(img)
 
         # Libera a imagem da memória explicitamente
@@ -68,26 +135,59 @@ def processar_imagem(caminho_arquivo):
             print(
                 f"[INFO] Frame: {frame_nmr}, Carro ID: {car_id}, Placa: {texto_detectado}, Confiança: {confianca_texto_detectado:.2f}"
             )
-           
-        # else:
-        # print(f"[INFO] Placa não detectada ou confiança baixa para {nome}. Conf: {confianca_texto_detectado}")
-
+        
+        arquivo_processado_com_sucesso = True
+        
     except cv2.error as e_cv:
-        print(f"[ERRO_CV2] Erro de OpenCV ao processar {caminho_arquivo}: {e_cv}")
+        print(f"[ERRO_CV2] Erro de OpenCV ao processar {nome}: {e_cv}")
+        arquivo_processado_com_sucesso = True  # Considera processado mesmo com erro
     except Exception as e_proc:
-        print(f"[ERRO_PROC] Erro inesperado ao processar imagem {caminho_arquivo}: {e_proc}")
+        print(f"[ERRO_PROC] Erro inesperado ao processar imagem {nome}: {e_proc}")
+        arquivo_processado_com_sucesso = True  # Considera processado mesmo com erro
     finally:
-        # Remove o arquivo após o processamento, mesmo se houver erro no OCR/DB
-        # mas não se o erro foi ao ler a imagem (já tratado acima)
-        if "img" in locals() or "img" in globals():  # Garante que img foi definida
-            try:
-                if os.path.exists(caminho_arquivo):
-                    os.remove(caminho_arquivo)
-                    # print(f"[INFO] Arquivo processado e removido: {caminho_arquivo}")
-            except Exception as e:
-                print(f"[ERRO] Não foi possível remover o arquivo {caminho_arquivo}: {e}")
-
+        # Remove o arquivo somente se foi carregado com sucesso ou houve erro no processamento
+        # Isso garante que arquivos problemáticos não fiquem acumulando
+        if img_carregada or arquivo_processado_com_sucesso:
+            sucesso_remocao = remover_arquivo_com_retry(caminho_arquivo)
+            if not sucesso_remocao:
+                print(f"[ERRO] Arquivo não foi removido: {nome}")
+        
         gc.collect()  # Coleta de lixo mais frequente pode ajudar em sistemas com pouca memória
+    
+    return arquivo_processado_com_sucesso
+
+
+def limpar_arquivos_antigos(pasta_base, idade_maxima_horas=24):
+    """
+    Remove arquivos órfãos que são muito antigos (provavelmente não processados corretamente).
+    """
+    arquivos_removidos = 0
+    tempo_limite = datetime.now() - timedelta(hours=idade_maxima_horas)
+    
+    try:
+        for root, dirs, files in os.walk(pasta_base):
+            for arquivo in files:
+                caminho_arquivo = os.path.join(root, arquivo)
+                try:
+                    # Verifica a data de modificação do arquivo
+                    timestamp_modificacao = os.path.getmtime(caminho_arquivo)
+                    data_modificacao = datetime.fromtimestamp(timestamp_modificacao)
+                    
+                    if data_modificacao < tempo_limite:
+                        print(f"[INFO] Removendo arquivo antigo: {os.path.basename(arquivo)}")
+                        if remover_arquivo_com_retry(caminho_arquivo):
+                            arquivos_removidos += 1
+                            
+                except Exception as e:
+                    print(f"[WARN] Erro ao verificar arquivo antigo {arquivo}: {e}")
+    
+    except Exception as e:
+        print(f"[ERRO] Erro durante limpeza de arquivos antigos: {e}")
+    
+    if arquivos_removidos > 0:
+        print(f"[INFO] Limpeza concluída: {arquivos_removidos} arquivos antigos removidos")
+    
+    return arquivos_removidos
 
 
 def main():
@@ -97,6 +197,8 @@ def main():
     print(f"[INFO] Confiança mínima para gravação: {confianca_gravar_texto}")
 
     processed_files_in_current_run = set()  # Para evitar reprocessar arquivos já vistos nesta execução
+    ultima_limpeza = datetime.now()
+    intervalo_limpeza = timedelta(hours=6)  # Limpeza a cada 6 horas
 
     try:
         while True:
@@ -147,11 +249,18 @@ def main():
                         print(f"[INFO] Ignorando arquivo de lock/temporário: {nome_arquivo}")
                         continue
 
-                    print(f"[INFO] Processando arquivo: {caminho_arquivo}")
-                    processar_imagem(caminho_arquivo)
-                    processed_files_in_current_run.add(caminho_arquivo)  # Adiciona ao set de processados
-                    encontrou_novos_arquivos = True
-                    # Pequena pausa para não sobrecarregar I/O ou CPU, e permitir que o buffer do DB seja enviado
+                    print(f"[INFO] Processando arquivo: {nome_arquivo}")
+                    
+                    # Processa o arquivo e verifica se foi bem-sucedido
+                    sucesso_processamento = processar_imagem(caminho_arquivo)
+                    
+                    if sucesso_processamento:
+                        processed_files_in_current_run.add(caminho_arquivo)  # Adiciona ao set de processados apenas se sucesso
+                        encontrou_novos_arquivos = True
+                    else:
+                        print(f"[WARN] Falha no processamento de {nome_arquivo}, será tentado novamente")
+                    
+                    # Pequena pausa para não sobrecarregar I/O ou CPU
                     # time.sleep(0.1)
 
             # Se não encontrou novos arquivos, descarrega o buffer e espera mais tempo
@@ -165,12 +274,22 @@ def main():
                 # flush_buffer_leituras() # Salva o que tiver no buffer após um ciclo de processamento
                 time.sleep(1)  # Espera curta se houve processamento
 
+            # Limpeza periódica de arquivos órfãos
+            agora = datetime.now()
+            if agora - ultima_limpeza > intervalo_limpeza:
+                print("[INFO] Iniciando limpeza de arquivos órfãos...")
+                limpar_arquivos_antigos(pasta_base, idade_maxima_horas=24)
+                ultima_limpeza = agora
+
             # Limpar o set de arquivos processados periodicamente para evitar consumo excessivo de memória
             # se o script rodar por muitos dias e processar milhões de arquivos únicos.
             if len(processed_files_in_current_run) > 10000:  # Ajuste este número conforme necessário
                 print("[INFO] Limpando cache de nomes de arquivos processados.")
                 processed_files_in_current_run.clear()
                 gc.collect()
+
+            # Limpeza de arquivos antigos a cada ciclo completo
+            limpar_arquivos_antigos(pasta_base, idade_maxima_horas=24)
 
     except KeyboardInterrupt:
         print("\n[INFO] Interrupção pelo usuário detectada. Finalizando...")
