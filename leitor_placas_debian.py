@@ -13,6 +13,8 @@ from util_debian import (
 
 # Caminho para ambiente Linux/Debian - usando diretório home do usuário
 pasta_base = os.path.join(os.path.expanduser("~"), "placas_detectadas")
+# Pasta de teste simples na raiz do projeto
+pasta_teste = os.path.join(os.path.dirname(os.path.abspath(__file__)), "teste")
 confianca_gravar_texto = 0.1  # Mantido, mas a lógica de correção pode ajudar placas com menor confiança inicial
 
 
@@ -225,6 +227,222 @@ def criar_pasta_base():
         return False
 
 
+def criar_estrutura_teste():
+    """
+    Cria uma pasta de teste simples na raiz do projeto.
+    Retorna True se a estrutura foi criada/existe, False em caso de erro.
+    """
+    try:
+        # Cria pasta teste simples na raiz do projeto
+        if not os.path.exists(pasta_teste):
+            os.makedirs(pasta_teste, mode=0o755)
+            print(f"[TESTE] Pasta de teste criada: {pasta_teste}")
+        
+        # Verifica permissões
+        if not os.access(pasta_teste, os.W_OK):
+            print(f"[ERRO] Sem permissão de escrita na pasta de teste: {pasta_teste}")
+            return False
+        
+        # Cria arquivo README explicativo
+        readme_path = os.path.join(pasta_teste, "README.txt")
+        if not os.path.exists(readme_path):
+            with open(readme_path, 'w') as f:
+                f.write(f"""PASTA DE TESTE - LEITOR DE PLACAS DEBIAN
+===========================================
+
+Esta pasta é usada para testar o funcionamento do leitor de placas.
+
+ESTRUTURA SIMPLES:
+- {pasta_teste}/
+  ├── README.txt (este arquivo)
+  └── [imagens de placas para teste]
+
+COMO USAR:
+1. Coloque imagens de placas diretamente nesta pasta
+2. Execute o leitor_placas_debian.py
+3. As imagens serão processadas e DELETADAS automaticamente
+
+FORMATO SUGERIDO PARA NOMES DE ARQUIVO:
+- placa_FRAME_ID_CARID.jpg
+- Exemplo: placa_001_123_456.jpg
+- Mas qualquer nome funcionará para teste
+
+NOTAS:
+- As imagens SERÃO REMOVIDAS após processamento
+- Logs aparecerão no terminal com resultados detalhados
+- Para preservar imagens, faça backup antes de colocar na pasta
+
+Criado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+""")
+            print(f"[TESTE] Arquivo README criado: {readme_path}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"[ERRO] Falha ao criar estrutura de teste: {e}")
+        return False
+
+
+def detectar_modo_teste():
+    """
+    Detecta se deve rodar em modo teste baseado na existência de imagens na pasta teste.
+    Retorna True se houver imagens para testar, False caso contrário.
+    """
+    if not os.path.exists(pasta_teste):
+        return False
+    
+    # Procura por imagens diretamente na pasta teste (estrutura simples)
+    try:
+        files = os.listdir(pasta_teste)
+        for arquivo in files:
+            if arquivo.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) and arquivo != 'README.txt':
+                return True
+    except Exception as e:
+        print(f"[WARN] Erro ao verificar pasta teste: {e}")
+    
+    return False
+
+
+def processar_pasta_teste():
+    """
+    Processa especificamente a pasta de teste simples.
+    Retorna número de arquivos processados.
+    """
+    arquivos_processados = 0
+    print(f"[TESTE] Iniciando processamento da pasta de teste: {pasta_teste}")
+    
+    try:
+        # Lista arquivos diretamente na pasta teste (estrutura simples)
+        files = os.listdir(pasta_teste)
+        arquivos_imagem = [f for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) and f != 'README.txt']
+        
+        if not arquivos_imagem:
+            print("[TESTE] Nenhuma imagem encontrada na pasta de teste.")
+            return 0
+        
+        print(f"[TESTE] Encontradas {len(arquivos_imagem)} imagens para processamento")
+        
+        for arquivo in arquivos_imagem:
+            caminho_arquivo = os.path.join(pasta_teste, arquivo)
+            print(f"[TESTE] Processando: {arquivo}")
+            
+            # Processa a imagem (com deleção)
+            sucesso = processar_imagem_teste(caminho_arquivo)
+            if sucesso:
+                arquivos_processados += 1
+                
+    except Exception as e:
+        print(f"[ERRO] Erro durante processamento de teste: {e}")
+    
+    return arquivos_processados
+
+
+def processar_imagem_teste(caminho_arquivo):
+    """
+    Versão de processar_imagem para modo teste.
+    DELETA as imagens após processamento conforme solicitado.
+    """
+    nome = os.path.basename(caminho_arquivo)
+    arquivo_processado_com_sucesso = False
+    img_carregada = False
+    
+    print(f"[TESTE] Processando imagem de teste: {nome}")
+    
+    # Verifica se o arquivo está completo antes de processar
+    if not verificar_arquivo_completo(caminho_arquivo, tempo_estabilidade=0.5):  # Tempo menor para teste
+        print(f"[TESTE] Arquivo não está pronto: {nome}")
+        return False
+    
+    try:
+        # Parse do nome do arquivo (mais flexível para testes)
+        frame_nmr = -1
+        car_id = -1
+        
+        # Tenta extrair informações do nome do arquivo
+        try:
+            if "_" in nome:
+                partes = nome.split("_")
+                if len(partes) >= 2:
+                    # Tenta encontrar números nas partes
+                    for parte in partes[1:]:
+                        # Remove extensão se necessário
+                        parte_limpa = parte.split('.')[0]
+                        if parte_limpa.isdigit():
+                            if frame_nmr == -1:
+                                frame_nmr = int(parte_limpa)
+                            elif car_id == -1:
+                                car_id = int(parte_limpa)
+                                break
+        except:
+            pass  # Usa valores padrão se não conseguir parsear
+        
+        # Se não conseguiu parsear, usa valores de teste
+        if frame_nmr == -1:
+            frame_nmr = 999  # Valor indicativo de teste
+        if car_id == -1:
+            car_id = 888  # Valor indicativo de teste
+        
+        print(f"[TESTE] Frame: {frame_nmr}, Car ID: {car_id}")
+        
+    except Exception as e:
+        print(f"[TESTE] Erro ao parsear nome do arquivo '{nome}': {e}")
+        frame_nmr = 999
+        car_id = 888
+
+    try:
+        # Carregar a imagem
+        img = cv2.imread(caminho_arquivo, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            print(f"[TESTE] Erro: Não foi possível ler a imagem: {nome}")
+            # Remove arquivo corrompido
+            remover_arquivo_com_retry(caminho_arquivo)
+            return True
+
+        img_carregada = True
+        print(f"[TESTE] Imagem carregada: {img.shape}")
+        
+        texto_detectado, confianca_texto_detectado = ler_placas2(img)
+
+        # Libera a imagem da memória
+        del img
+
+        # Exibe resultados detalhados para teste
+        if texto_detectado is not None and confianca_texto_detectado is not None:
+            print(f"[TESTE] ✅ PLACA DETECTADA: {texto_detectado}")
+            print(f"[TESTE] 📊 Confiança: {confianca_texto_detectado:.2f}")
+            print(f"[TESTE] 🎯 Frame: {frame_nmr}, Car ID: {car_id}")
+            
+            if confianca_texto_detectado > confianca_gravar_texto:
+                print(f"[TESTE] ✅ Confiança acima do mínimo ({confianca_gravar_texto})")
+                # Em modo teste, não salva no banco por padrão
+                print(f"[TESTE] 💾 Salvamento no banco DESABILITADO (modo teste)")
+            else:
+                print(f"[TESTE] ⚠️ Confiança abaixo do mínimo ({confianca_gravar_texto})")
+        else:
+            print(f"[TESTE] ❌ Nenhuma placa detectada em: {nome}")
+        
+        arquivo_processado_com_sucesso = True
+        
+    except cv2.error as e_cv:
+        print(f"[TESTE] Erro OpenCV: {e_cv}")
+        arquivo_processado_com_sucesso = True
+    except Exception as e_proc:
+        print(f"[TESTE] Erro inesperado: {e_proc}")
+        arquivo_processado_com_sucesso = True
+    finally:
+        # DELETA os arquivos após processamento conforme solicitado
+        if img_carregada or arquivo_processado_com_sucesso:
+            sucesso_remocao = remover_arquivo_com_retry(caminho_arquivo)
+            if sucesso_remocao:
+                print(f"[TESTE] �️ Arquivo de teste removido: {nome}")
+            else:
+                print(f"[TESTE] ❌ Falha ao remover arquivo de teste: {nome}")
+        
+        gc.collect()
+    
+    return arquivo_processado_com_sucesso
+
+
 def main():
     # Arquivos ignorados adaptados para Linux (sem .crdownload que é específico do Chrome/Windows)
     arquivos_ignorados = {".tmp", ".part", ".lock", ".swp", ".~"}
@@ -236,6 +454,18 @@ def main():
     if not criar_pasta_base():
         print("[ERRO] Não foi possível configurar a pasta base. Encerrando.")
         return
+
+    # Cria estrutura de teste
+    criar_estrutura_teste()
+    
+    # Verifica se está em modo teste
+    modo_teste = detectar_modo_teste()
+    if modo_teste:
+        print("🧪 [TESTE] Modo teste detectado! Processando imagens de teste...")
+        arquivos_processados = processar_pasta_teste()
+        print(f"🧪 [TESTE] Concluído! {arquivos_processados} arquivos processados.")
+        print("🧪 [TESTE] Para teste contínuo, o monitoramento normal continuará...")
+        print("=" * 60)
 
     processed_files_in_current_run = set()  # Para evitar reprocessar arquivos já vistos nesta execução
     ultima_limpeza = datetime.now()
@@ -260,6 +490,32 @@ def main():
                 print(f"[WARN] Problema ao acessar pasta base {pasta_base}: {e}. Tentando novamente.")
                 time.sleep(5)
                 continue
+
+            # Verifica pasta teste separadamente (estrutura simples)
+            if os.path.exists(pasta_teste):
+                try:
+                    arquivos_teste = [f for f in os.listdir(pasta_teste) 
+                                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) and f != 'README.txt']
+                    
+                    for nome_arquivo in arquivos_teste:
+                        caminho_arquivo = os.path.join(pasta_teste, nome_arquivo)
+                        
+                        if caminho_arquivo in processed_files_in_current_run:
+                            continue  # Já processado nesta sessão
+                        
+                        print(f"[TESTE] Processando arquivo de teste: {nome_arquivo}")
+                        sucesso_processamento = processar_imagem_teste(caminho_arquivo)
+                        
+                        if sucesso_processamento:
+                            processed_files_in_current_run.add(caminho_arquivo)
+                            encontrou_novos_arquivos = True
+                        else:
+                            print(f"[TESTE] Falha no processamento de {nome_arquivo}")
+                            
+                except Exception as e:
+                    print(f"[WARN] Erro ao processar pasta teste: {e}")
+
+            # Processa pastas de dados normais
 
             for data_dir in subpastas_data:
                 pasta_data = os.path.join(pasta_base, data_dir)
@@ -297,7 +553,7 @@ def main():
 
                     print(f"[INFO] Processando arquivo: {nome_arquivo}")
                     
-                    # Processa o arquivo e verifica se foi bem-sucedido
+                    # Usa processamento normal para arquivos da pasta base
                     sucesso_processamento = processar_imagem(caminho_arquivo)
                     
                     if sucesso_processamento:
