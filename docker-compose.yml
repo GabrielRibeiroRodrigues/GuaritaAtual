@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  leitor-ocr:
+    # 'build: .' diz ao Docker para construir a imagem usando o Dockerfile
+    # que está no mesmo diretório.
+    build: .
+
+    # 'container_name' define um nome fixo e amigável para o seu contêiner.
+    container_name: servico-leitor-placas-ocr
+
+    # 'restart: unless-stopped' faz o contêiner reiniciar automaticamente
+    # se ele falhar, a menos que você o pare manualmente.
+    restart: unless-stopped
