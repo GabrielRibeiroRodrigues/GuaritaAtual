@@ -1,24 +1,29 @@
-# api_server.py (versão de teste, sem banco de dados)
+# api_server.py (versão de teste final, com correção de path)
+
+import sys
+import os
+
+# --- CORREÇÃO DO PROBLEMA DE IMPORTAÇÃO ---
+# Adiciona o diretório atual do script ao path de busca do Python.
+# Isso garante que o Python encontrará os outros módulos locais como 'util_debian' e 'logger_utils'.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+# -----------------------------------------
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
-# from contextlib import asynccontextmanager # Não precisamos mais disso por enquanto
 import cv2
 import numpy as np
 import io
 
-# Importamos apenas a função de OCR do nosso utilitário
+# Agora estas importações devem funcionar sem erro!
 from util_debian import ler_placas2
 from logger_utils import logger
 
-# --- Lógica de Ciclo de Vida foi REMOVIDA, pois era para o DB ---
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     ...
 
-# --- Criação da Aplicação FastAPI (sem o lifespan) ---
+# --- Criação da Aplicação FastAPI ---
 app = FastAPI(
     title="API de OCR de Placas (Modo Teste)",
-    version="1.2.0",
+    version="1.3.0",
     description="Serviço para reconhecimento de placas, sem conexão com DB.",
 )
 
@@ -59,7 +64,7 @@ async def processar_imagem_endpoint(background_tasks: BackgroundTasks, file: Upl
         raise HTTPException(status_code=400, detail="Arquivo inválido. Apenas imagens são aceitas.")
 
     contents = await file.read()
-    background_tasks.add_task(tarefa_ocr, contents, file.filename)
+    background_tasks.add_task(tarefa_de_ocr, contents, file.filename)
 
     return {"message": "Imagem recebida e agendada para processamento (sem gravação no DB)."}
 
