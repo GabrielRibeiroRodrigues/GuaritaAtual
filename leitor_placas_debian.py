@@ -151,6 +151,8 @@ def processar_imagem(caminho_arquivo):
             print(
                 f"[INFO] Frame: {frame_nmr}, Carro ID: {car_id}, Placa: {texto_detectado}, Confiança: {confianca_texto_detectado:.2f}"
             )
+            # Salva no "banco" (que agora só exibe no terminal)
+            salvar_no_postgres(frame_nmr, car_id, texto_detectado, confianca_texto_detectado)
         
         arquivo_processado_com_sucesso = True
         
@@ -414,10 +416,11 @@ def processar_imagem_teste(caminho_arquivo):
             
             if confianca_texto_detectado > confianca_gravar_texto:
                 print(f"[TESTE] ✅ Confiança acima do mínimo ({confianca_gravar_texto})")
-                # Em modo teste, não salva no banco por padrão
-                print(f"[TESTE] 💾 Salvamento no banco DESABILITADO (modo teste)")
+                # Chama função de salvamento (que agora só exibe no terminal)
+                salvar_no_postgres(frame_nmr, car_id, texto_detectado, confianca_texto_detectado)
             else:
                 print(f"[TESTE] ⚠️ Confiança abaixo do mínimo ({confianca_gravar_texto})")
+                print(f"[TESTE] ❌ Placa não será salva: {texto_detectado} (confiança: {confianca_texto_detectado:.2f})")
         else:
             print(f"[TESTE] ❌ Nenhuma placa detectada em: {nome}")
         

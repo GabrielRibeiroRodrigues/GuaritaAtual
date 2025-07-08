@@ -111,161 +111,183 @@ def corrigir_placa(text, pattern_code):
     return "".join(corrected_plate)
 
 # Configuração de banco de dados para ambiente Linux/Debian
-def get_db_config():
-    """
-    Obtém configuração de banco de dados via variáveis de ambiente
-    ou arquivo de configuração específico para Linux.
-    """
-    # Configuração via variáveis de ambiente (recomendado para produção)
-    db_config = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'port': os.getenv('DB_PORT', '5432'),
-        'database': os.getenv('DB_NAME', 'guarita'),
-        'user': os.getenv('DB_USER', 'postgres'),
-        'password': os.getenv('DB_PASSWORD', ''),
-    }
-    
-    # Arquivo de configuração alternativo (se não houver variáveis de ambiente)
-    config_file = os.path.expanduser('~/.config/guarita/db_config')
-    if not any(db_config.values()) and os.path.exists(config_file):
-        try:
-            with open(config_file, 'r') as f:
-                for line in f:
-                    if '=' in line and not line.strip().startswith('#'):
-                        key, value = line.strip().split('=', 1)
-                        if key.upper() in ['HOST', 'PORT', 'DATABASE', 'USER', 'PASSWORD']:
-                            db_config[key.lower()] = value
-        except Exception as e:
-            print(f"[WARN] Erro ao ler arquivo de configuração {config_file}: {e}")
-    
-    return db_config
+# COMENTADO: Conexão com PostgreSQL temporariamente desabilitada
+# def get_db_config():
+#     """
+#     Obtém configuração de banco de dados via variáveis de ambiente
+#     ou arquivo de configuração específico para Linux.
+#     """
+#     # Configuração via variáveis de ambiente (recomendado para produção)
+#     db_config = {
+#         'host': os.getenv('DB_HOST', 'localhost'),
+#         'port': os.getenv('DB_PORT', '5432'),
+#         'database': os.getenv('DB_NAME', 'guarita'),
+#         'user': os.getenv('DB_USER', 'postgres'),
+#         'password': os.getenv('DB_PASSWORD', ''),
+#     }
+#     
+#     # Arquivo de configuração alternativo (se não houver variáveis de ambiente)
+#     config_file = os.path.expanduser('~/.config/guarita/db_config')
+#     if not any(db_config.values()) and os.path.exists(config_file):
+#         try:
+#             with open(config_file, 'r') as f:
+#                 for line in f:
+#                     if '=' in line and not line.strip().startswith('#'):
+#                         key, value = line.strip().split('=', 1)
+#                         if key.upper() in ['HOST', 'PORT', 'DATABASE', 'USER', 'PASSWORD']:
+#                             db_config[key.lower()] = value
+#         except Exception as e:
+#             print(f"[WARN] Erro ao ler arquivo de configuração {config_file}: {e}")
+#     
+#     return db_config
 
 # Inicialização das variáveis globais
-conexao = None
-cursor = None
-buffer_leituras = []
-BUFFER_SIZE = 10  # Increased buffer size
+# COMENTADO: Variáveis de banco PostgreSQL temporariamente desabilitadas
+# conexao = None
+# cursor = None
+# buffer_leituras = []
+# BUFFER_SIZE = 10  # Increased buffer size
 
-def init_db_connection():
-    """
-    Inicializa a conexão com o banco de dados PostgreSQL.
-    Adaptado para ambiente Linux com melhor tratamento de erro.
-    """
-    global conexao, cursor
-    
-    if conexao is not None:
-        return True  # Já conectado
-    
-    try:
-        db_config = get_db_config()
-        print(f"[DB_INFO] Conectando ao PostgreSQL em {db_config['host']}:{db_config['port']}")
-        
-        conexao = psycopg2.connect(
-            host=db_config['host'],
-            port=db_config['port'],
-            database=db_config['database'],
-            user=db_config['user'],
-            password=db_config['password'],
-            # Configurações específicas para Linux
-            connect_timeout=30,
-            application_name='guarita_leitor_placas_debian'
-        )
-        
-        cursor = conexao.cursor()
-        
-        # Teste de conectividade
-        cursor.execute("SELECT version();")
-        version = cursor.fetchone()
-        print(f"[DB_INFO] Conectado ao PostgreSQL: {version[0]}")
-        
-        return True
-        
-    except psycopg2.OperationalError as e:
-        print(f"[DB_ERROR] Erro de conectividade PostgreSQL: {e}")
-        print("[DB_INFO] Verifique se o PostgreSQL está rodando e as credenciais estão corretas")
-        return False
-    except Exception as e:
-        print(f"[DB_ERROR] Erro inesperado ao conectar ao PostgreSQL: {e}")
-        return False
+# def init_db_connection():
+#     """
+#     Inicializa a conexão com o banco de dados PostgreSQL.
+#     Adaptado para ambiente Linux com melhor tratamento de erro.
+#     """
+#     global conexao, cursor
+#     
+#     if conexao is not None:
+#         return True  # Já conectado
+#     
+#     try:
+#         db_config = get_db_config()
+#         print(f"[DB_INFO] Conectando ao PostgreSQL em {db_config['host']}:{db_config['port']}")
+#         
+#         conexao = psycopg2.connect(
+#             host=db_config['host'],
+#             port=db_config['port'],
+#             database=db_config['database'],
+#             user=db_config['user'],
+#             password=db_config['password'],
+#             # Configurações específicas para Linux
+#             connect_timeout=30,
+#             application_name='guarita_leitor_placas_debian'
+#         )
+#         
+#         cursor = conexao.cursor()
+#         
+#         # Teste de conectividade
+#         cursor.execute("SELECT version();")
+#         version = cursor.fetchone()
+#         print(f"[DB_INFO] Conectado ao PostgreSQL: {version[0]}")
+#         
+#         return True
+#         
+#     except psycopg2.OperationalError as e:
+#         print(f"[DB_ERROR] Erro de conectividade PostgreSQL: {e}")
+#         print("[DB_INFO] Verifique se o PostgreSQL está rodando e as credenciais estão corretas")
+#         return False
+#     except Exception as e:
+#         print(f"[DB_ERROR] Erro inesperado ao conectar ao PostgreSQL: {e}")
+#         return False
 
 def salvar_no_postgres(frame_nmr, car_id, license_number, license_number_score):
-    global buffer_leituras, conexao, cursor
+    """
+    COMENTADO: Função de salvamento no PostgreSQL temporariamente desabilitada.
+    Apenas exibe os dados no terminal para testes.
+    """
+    # global buffer_leituras, conexao, cursor
     
-    # Inicializa conexão se necessário
-    if not conexao or conexao.closed:
-        if not init_db_connection():
-            print("[DB_ERROR] Não foi possível conectar ao banco. Dados não salvos.")
-            return
+    # # Inicializa conexão se necessário
+    # if not conexao or conexao.closed:
+    #     if not init_db_connection():
+    #         print("[DB_ERROR] Não foi possível conectar ao banco. Dados não salvos.")
+    #         return
     
     data_hora_atual = datetime.now()
-    buffer_leituras.append((int(frame_nmr), int(car_id), license_number, float(license_number_score), data_hora_atual))
     
-    if len(buffer_leituras) >= BUFFER_SIZE:
-        try:
-            comando_sql = """
-            INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
-            VALUES (%s, %s, %s, %s, %s);
-            """
-            cursor.executemany(comando_sql, buffer_leituras)
-            conexao.commit()
-            print(f"[DB_INFO] Lote de {len(buffer_leituras)} leituras salvo no banco de dados.")
-            buffer_leituras = []
-        except psycopg2.Error as e:
-            print(f"[DB_ERROR] Erro ao salvar lote no PostgreSQL: {e}")
-            # Tenta reconectar em caso de erro de conexão
-            if "connection" in str(e).lower():
-                print("[DB_INFO] Tentando reconectar ao banco...")
-                init_db_connection()
-            conexao.rollback() if conexao and not conexao.closed else None
-            buffer_leituras = [] # Clear buffer on error to avoid retrying bad data
-        except Exception as ex:
-            print(f"[DB_ERROR] Erro inesperado ao salvar lote: {ex}")
-            conexao.rollback() if conexao and not conexao.closed else None
-            buffer_leituras = []
+    # MODO TESTE: Apenas exibe no terminal
+    print(f"🚗 [PLACA_DETECTADA] Frame: {frame_nmr}, Car ID: {car_id}")
+    print(f"📋 [PLACA_DETECTADA] Placa: {license_number}")
+    print(f"📊 [PLACA_DETECTADA] Confiança: {license_number_score:.2f}")
+    print(f"🕒 [PLACA_DETECTADA] Data/Hora: {data_hora_atual.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("-" * 60)
+    
+    # buffer_leituras.append((int(frame_nmr), int(car_id), license_number, float(license_number_score), data_hora_atual))
+    
+    # if len(buffer_leituras) >= BUFFER_SIZE:
+    #     try:
+    #         comando_sql = """
+    #         INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
+    #         VALUES (%s, %s, %s, %s, %s);
+    #         """
+    #         cursor.executemany(comando_sql, buffer_leituras)
+    #         conexao.commit()
+    #         print(f"[DB_INFO] Lote de {len(buffer_leituras)} leituras salvo no banco de dados.")
+    #         buffer_leituras = []
+    #     except psycopg2.Error as e:
+    #         print(f"[DB_ERROR] Erro ao salvar lote no PostgreSQL: {e}")
+    #         # Tenta reconectar em caso de erro de conexão
+    #         if "connection" in str(e).lower():
+    #             print("[DB_INFO] Tentando reconectar ao banco...")
+    #             init_db_connection()
+    #         conexao.rollback() if conexao and not conexao.closed else None
+    #         buffer_leituras = [] # Clear buffer on error to avoid retrying bad data
+    #     except Exception as ex:
+    #         print(f"[DB_ERROR] Erro inesperado ao salvar lote: {ex}")
+    #         conexao.rollback() if conexao and not conexao.closed else None
+    #         buffer_leituras = []
 
 def flush_buffer_leituras():
-    global buffer_leituras, conexao, cursor
+    """
+    COMENTADO: Função de flush do buffer temporariamente desabilitada.
+    """
+    # global buffer_leituras, conexao, cursor
     
-    if not buffer_leituras:
-        return
+    # if not buffer_leituras:
+    #     return
     
-    # Inicializa conexão se necessário
-    if not conexao or conexao.closed:
-        if not init_db_connection():
-            print("[DB_ERROR] Não foi possível conectar ao banco para flush. Dados perdidos.")
-            buffer_leituras = []
-            return
+    print("[INFO] Modo teste: não há buffer para descarregar (PostgreSQL desabilitado)")
     
-    try:
-        comando_sql = """
-        INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
-        VALUES (%s, %s, %s, %s, %s);
-        """
-        cursor.executemany(comando_sql, buffer_leituras)
-        conexao.commit()
-        print(f"[DB_INFO] Buffer final de {len(buffer_leituras)} leituras salvo no banco de dados.")
-    except psycopg2.Error as e:
-        print(f"[DB_ERROR] Erro ao fazer flush do buffer para o PostgreSQL: {e}")
-        conexao.rollback() if conexao and not conexao.closed else None
-    except Exception as ex:
-        print(f"[DB_ERROR] Erro inesperado ao fazer flush do buffer: {ex}")
-        conexao.rollback() if conexao and not conexao.closed else None
-    finally:
-        buffer_leituras = [] # Always clear after attempting flush
+    # # Inicializa conexão se necessário
+    # if not conexao or conexao.closed:
+    #     if not init_db_connection():
+    #         print("[DB_ERROR] Não foi possível conectar ao banco para flush. Dados perdidos.")
+    #         buffer_leituras = []
+    #         return
+    
+    # try:
+    #     comando_sql = """
+    #     INSERT INTO transito_leitura_placa (frame_nmr,car_id,license_number,license_number_score,data_hora)
+    #     VALUES (%s, %s, %s, %s, %s);
+    #     """
+    #     cursor.executemany(comando_sql, buffer_leituras)
+    #     conexao.commit()
+    #     print(f"[DB_INFO] Buffer final de {len(buffer_leituras)} leituras salvo no banco de dados.")
+    # except psycopg2.Error as e:
+    #     print(f"[DB_ERROR] Erro ao fazer flush do buffer para o PostgreSQL: {e}")
+    #     conexao.rollback() if conexao and not conexao.closed else None
+    # except Exception as ex:
+    #     print(f"[DB_ERROR] Erro inesperado ao fazer flush do buffer: {ex}")
+    #     conexao.rollback() if conexao and not conexao.closed else None
+    # finally:
+    #     buffer_leituras = [] # Always clear after attempting flush
 
 def close_db_connection():
-    global conexao, cursor
-    print("[INFO] Tentando descarregar buffer e fechar conexão com DB...")
-    flush_buffer_leituras()
+    """
+    COMENTADO: Função de fechamento da conexão temporariamente desabilitada.
+    """
+    # global conexao, cursor
+    print("[INFO] Modo teste: não há conexão de banco para fechar (PostgreSQL desabilitado)")
+    # flush_buffer_leituras()
     
-    try:
-        if cursor:
-            cursor.close()
-        if conexao and not conexao.closed:
-            conexao.close()
-        print("[DB_INFO] Conexão com PostgreSQL fechada.")
-    except Exception as e:
-        print(f"[DB_WARN] Erro ao fechar conexão: {e}")
+    # try:
+    #     if cursor:
+    #         cursor.close()
+    #     if conexao and not conexao.closed:
+    #         conexao.close()
+    #     print("[DB_INFO] Conexão com PostgreSQL fechada.")
+    # except Exception as e:
+    #     print(f"[DB_WARN] Erro ao fechar conexão: {e}")
 
 def limpar_texto_placa(texto):
     """
@@ -349,17 +371,21 @@ def ler_placas2(placa_carro_crop): # PaddleOCR based - Versão Debian
         return None, None
 
 # Inicialização automática da conexão ao importar o módulo (Linux style)
-def __init_module():
-    """
-    Inicialização do módulo para ambiente Linux.
-    """
-    try:
-        # Tenta inicializar a conexão com banco na importação
-        if not init_db_connection():
-            print("[DB_WARN] Banco de dados não disponível no momento da importação.")
-            print("[DB_INFO] A conexão será tentada novamente durante o uso.")
-    except Exception as e:
-        print(f"[DB_WARN] Erro na inicialização do módulo: {e}")
+# COMENTADO: Inicialização de banco temporariamente desabilitada
+# def __init_module():
+#     """
+#     Inicialização do módulo para ambiente Linux.
+#     """
+#     try:
+#         # Tenta inicializar a conexão com banco na importação
+#         if not init_db_connection():
+#             print("[DB_WARN] Banco de dados não disponível no momento da importação.")
+#             print("[DB_INFO] A conexão será tentada novamente durante o uso.")
+#     except Exception as e:
+#         print(f"[DB_WARN] Erro na inicialização do módulo: {e}")
 
-# Chama inicialização quando módulo é importado
-__init_module()
+# # Chama inicialização quando módulo é importado
+# __init_module()
+
+print("[INFO] Módulo util_debian carregado - Modo TESTE (PostgreSQL desabilitado)")
+print("[INFO] As placas detectadas serão exibidas apenas no terminal")

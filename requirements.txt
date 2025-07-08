@@ -9,8 +9,9 @@ paddlepaddle==2.5.2
 # Usamos versões específicas que sabemos serem compatíveis com a CPU
 
 # Banco de Dados
-psycopg2-binary~=2.9.9
+# psycopg2-binary~=2.9.9  # Comentado: PostgreSQL temporariamente desabilitado
 
 # Outras dependências do seu util.py
 numpy~=1.24.3
 opencv-python~=4.7.0.72
+Pillow>=9.0.0  # Para suporte a WebP e outros formatos

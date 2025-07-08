@@ -1,41 +1,30 @@
-# api_server.py
+# api_server.py (versão de teste, sem banco de dados)
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
-from contextlib import asynccontextmanager
+# from contextlib import asynccontextmanager # Não precisamos mais disso por enquanto
 import cv2
 import numpy as np
 import io
 
-# Assumindo que suas funções de utilitários e logging estão prontas
-from util_debian import (
-    ler_placas2, 
-    salvar_no_postgres, 
-    init_connection_pool, 
-    close_db_connection
-)
+# Importamos apenas a função de OCR do nosso utilitário
+from util_debian import ler_placas2
 from logger_utils import logger
 
-# --- Gerenciamento do Ciclo de Vida (Lifespan) ---
-# Esta é a forma moderna de lidar com inicialização e finalização no FastAPI
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("API iniciando: Inicializando pool de conexões com o DB.")
-    init_connection_pool()
-    yield
-    logger.info("API desligando: Fechando pool de conexões.")
-    close_db_connection()
+# --- Lógica de Ciclo de Vida foi REMOVIDA, pois era para o DB ---
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     ...
 
+# --- Criação da Aplicação FastAPI (sem o lifespan) ---
 app = FastAPI(
-    title="Serviço de OCR de Placas",
-    version="1.1.0",
-    description="Um serviço otimizado para reconhecimento de placas de veículos.",
-    lifespan=lifespan
+    title="API de OCR de Placas (Modo Teste)",
+    version="1.2.0",
+    description="Serviço para reconhecimento de placas, sem conexão com DB.",
 )
 
-# --- Função da Tarefa em Segundo Plano ---
-def tarefa_ocr_e_db(imagem_bytes: bytes, nome_arquivo: str):
-    """
-    Função robusta que executa o trabalho pesado em background para não bloquear a API.
-    """
+# --- Nossa função de processamento pesado ---
+def tarefa_de_ocr(imagem_bytes: bytes, nome_arquivo: str):
+    """Esta função será executada em segundo plano."""
     try:
         logger.info(f"Iniciando processamento em background para: {nome_arquivo}")
         nparr = np.frombuffer(imagem_bytes, np.uint8)
@@ -47,31 +36,34 @@ def tarefa_ocr_e_db(imagem_bytes: bytes, nome_arquivo: str):
 
         texto, confianca = ler_placas2(img)
         if texto and confianca:
-            salvar_no_postgres(frame_nmr=-1, car_id=-1, plate=texto, confidence=confianca)
+            # Em vez de salvar no banco, vamos apenas imprimir no log!
+            print("--- RESULTADO DO OCR ---")
+            print(f"Placa Lida: {texto}")
+            print(f"Confiança: {confianca:.4f}")
+            print("------------------------")
             logger.info(f"Processamento em background concluído para: {nome_arquivo}, Placa: {texto}")
+        else:
+            logger.info("OCR em segundo plano não encontrou placa com confiança suficiente.")
+
     except Exception as e:
         logger.error(f"Erro na tarefa de background para {nome_arquivo}", error=str(e), exc_info=True)
 
 
-# --- Endpoint Principal da API ---
+# --- Endpoint Principal da API Modificado ---
 @app.post("/processar_imagem/")
 async def processar_imagem_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """
-    Recebe uma imagem, responde imediatamente e agenda o processamento em background.
+    Recebe uma imagem, responde imediatamente e agenda o processamento de OCR.
     """
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Arquivo inválido. Apenas imagens são aceitas.")
 
     contents = await file.read()
-    
-    # Adiciona a tarefa pesada para ser executada em segundo plano
-    background_tasks.add_task(tarefa_ocr_e_db, contents, file.filename)
+    background_tasks.add_task(tarefa_ocr, contents, file.filename)
 
-    # Retorna uma resposta imediata e leve
-    return {"message": "Imagem recebida e agendada para processamento."}
+    return {"message": "Imagem recebida e agendada para processamento (sem gravação no DB)."}
 
-# --- Endpoint de Verificação de Saúde (Health Check) ---
+# --- Endpoint de verificação de saúde (Health Check) ---
 @app.get("/health")
 def health_check():
-    """Endpoint simples para monitoramento, verifica se a API está online."""
     return {"status": "ok"}
